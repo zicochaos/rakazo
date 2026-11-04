@@ -4,6 +4,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type {
   pickFromLibrary as PickFromLibrary,
   readDroppedFiles as ReadDroppedFiles,
+  takePhoto as TakePhoto,
 } from "./pick-attachments";
 
 const state = vi.hoisted(() => ({
@@ -67,7 +68,7 @@ const nodeModule = Module as unknown as {
 const originalLoad = nodeModule._load;
 
 let pickFromLibrary: typeof PickFromLibrary;
-let takePhoto: typeof import("./pick-attachments").takePhoto;
+let takePhoto: typeof TakePhoto;
 let readDroppedFiles: typeof ReadDroppedFiles;
 
 function asset(overrides: Partial<typeof state.asset> = {}) {
@@ -366,5 +367,17 @@ describe("unreadable picks", () => {
 
     expect(result.attachments).toEqual([]);
     expect(result.skipped).toEqual([{ name: "photo.jpg", reason: "could not read" }]);
+  });
+
+  it("reports a full draft before reading the camera photo", async () => {
+    state.base64.mockRejectedValue(new Error("read failed"));
+
+    const result = await takePhoto(ATTACHMENT_MAX_COUNT);
+
+    expect(result.attachments).toEqual([]);
+    expect(result.skipped).toEqual([
+      { name: "photo.jpg", reason: `max ${ATTACHMENT_MAX_COUNT} attachments` },
+    ]);
+    expect(state.base64).not.toHaveBeenCalled();
   });
 });

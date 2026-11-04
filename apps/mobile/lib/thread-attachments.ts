@@ -47,6 +47,9 @@ export function useThreadAttachments({
 }) {
   const { t } = useI18n();
   const threadKey = groupId ?? botId;
+  // Read when a picker settles, so its result or error lands only in the chat that opened it.
+  const currentThreadKey = useRef(threadKey);
+  currentThreadKey.current = threadKey;
   const [pendingAttachments, setPendingAttachments] = useState<PendingAttachment[]>([]);
   const [attachmentNotice, setAttachmentNotice] = useState<string | null>(null);
   const activePendingAttachments = attachmentsForThread(pendingAttachments, threadKey);
@@ -90,10 +93,12 @@ export function useThreadAttachments({
       );
     } catch (error) {
       // A picker that fails to open reports it instead of rejecting unhandled.
-      setAttachmentNotice(errorText(error, t("Could not attach files")));
+      if (currentThreadKey.current === targetKey) {
+        setAttachmentNotice(errorText(error, t("Could not attach files")));
+      }
       return;
     }
-    if ((groupId ?? botId) !== targetKey) return;
+    if (currentThreadKey.current !== targetKey) return;
     // Two drops can overlap, so the room left is settled against the draft as it
     // is now, not as it was when this read began.
     const room = Math.max(

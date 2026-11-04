@@ -172,6 +172,13 @@ export async function takePhoto(
   const asset = result.assets[0];
   if (!asset) return { attachments: [], skipped: [] };
   const originalName = asset.fileName ?? `photo-${Date.now()}.jpg`;
+  // A full draft says so before the photo is read, as the other pickers do.
+  if (existingCount >= maxCount) {
+    return {
+      attachments: [],
+      skipped: [{ name: originalName, reason: attachmentCountSkipReason(maxCount) }],
+    };
+  }
   const prepared = await prepareImage(
     asset.uri,
     originalName,
