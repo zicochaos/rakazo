@@ -7,8 +7,8 @@ type OrganizationList = {
 };
 
 test.afterEach(async ({ page }) => {
-  // Not "wait": a handler whose fulfill() lost a race to the route teardown never settles,
-  // and "wait" would then hang the test to its timeout.
+  // Not "wait": with intercepted reads still in flight at teardown, "wait" was seen to hang
+  // the test to its timeout.
   await page.unrouteAll({ behavior: "ignoreErrors" });
 });
 
