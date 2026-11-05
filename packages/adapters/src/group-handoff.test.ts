@@ -441,7 +441,8 @@ describe("explicit group destinations", () => {
       }),
     ).resolves.toMatchObject({ error: "group is no longer available" });
     expect(h.messageCreate).not.toHaveBeenCalled();
-    expect(h.tx.$queryRaw.mock.calls[0]?.slice(1)).toEqual(["group-1", run.spaceId, run.userId]);
+    // The group lock binds the group and its owner; its lock clause follows as a SQL fragment.
+    expect(h.tx.$queryRaw.mock.calls[0]?.slice(1, 4)).toEqual(["group-1", run.spaceId, run.userId]);
   });
 
   it("requires both bots to be active members of the destination", async () => {
