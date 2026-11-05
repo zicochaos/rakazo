@@ -228,7 +228,7 @@ export async function verifyVoiceHttpGet(options: {
   }
 }
 
-const LANGUAGE_TAG = /^([A-Za-z]{2,3})(?:-[A-Za-z0-9]{2,8})*$/;
+const LANGUAGE_TAG = /^([A-Za-z]{2,3})(?:-[A-Za-z0-9]{1,8})*$/;
 
 /**
  * The lowercase primary language subtag speech-to-text providers expect, or undefined when the

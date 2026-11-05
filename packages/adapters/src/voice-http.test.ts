@@ -245,6 +245,8 @@ describe("voiceLanguageHint", () => {
     expect(voiceLanguageHint("es-ES")).toBe("es");
     expect(voiceLanguageHint(" PT-br ")).toBe("pt");
     expect(voiceLanguageHint("zh-Hant-TW")).toBe("zh");
+    expect(voiceLanguageHint("de-u-co-phonebk")).toBe("de");
+    expect(voiceLanguageHint("en-x-twain")).toBe("en");
   });
 
   it("omits values that are not language tags", () => {
