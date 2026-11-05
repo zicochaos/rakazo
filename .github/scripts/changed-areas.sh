@@ -23,7 +23,7 @@ compose=false
 all_packages=false
 while IFS= read -r file; do
   case "$file" in
-    */Dockerfile*) all_packages=true ;;
+    infra/*/Dockerfile*) all_packages=true ;;
     apps/*/package.json | packages/*/package.json | infra/*/package.json) all_packages=true ;;
     apps/*/* | packages/*/* | infra/sandboxes/supervisor/* | infra/updater/*) ;;
     .agents/skills/pr-watch/*) all_packages=true ;;
