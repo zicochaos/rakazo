@@ -39,8 +39,7 @@ test("a nearly full computer offers to clean up its disk", async ({ page }, test
   await expect(warning).toHaveCount(0);
   expect(sent).toMatchObject({ text: expect.stringContaining("disk is nearly full") });
   // A status read still in flight would otherwise fail once the page closes. Waiting is not an
-  // option: with two reads intercepted at once, the first to settle makes the server drop the
-  // interception, so the other's fulfill fails "Route is already handled"; the swallow above then
-  // strands that handler and the wait would never return.
+  // option: with two reads intercepted at once, `behavior: "wait"` was seen to hang until the
+  // test timeout (about a third of runs on a slowed API), so the teardown does not wait.
   await page.unrouteAll({ behavior: "ignoreErrors" });
 });
