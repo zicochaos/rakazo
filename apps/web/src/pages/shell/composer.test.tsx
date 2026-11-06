@@ -1568,11 +1568,18 @@ it("recovers a queued dictation's failed send for a chat that was left and not e
     act(() => onFinal("and a hotel"));
     await act(async () => {});
     act(() => root?.render(<Composer {...composerProps} key="bot:bot-2" draftKey="bot:bot-2" />));
+    // The user comes back without editing; the open field follows the recovered draft.
+    act(() => root?.render(<Composer {...composerProps} key="bot:bot-1:again" sending={false} />));
+    const returned = container?.querySelector("textarea");
+    if (!returned) throw new Error("composer textarea not found");
+    expect(returned.value).toBe("and a hotel");
     await act(async () => finish(false));
 
     expect(onSend).toHaveBeenCalledTimes(1);
+    expect(returned.value).toBe("please book the flight and a hotel");
+    type(returned, "please book the flight and a hotel tonight");
     expect(localStorage.getItem("rakazo.composerDraft.bot:bot-1")).toBe(
-      "please book the flight and a hotel",
+      "please book the flight and a hotel tonight",
     );
   } finally {
     listen.mockRestore();

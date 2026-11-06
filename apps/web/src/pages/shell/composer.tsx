@@ -46,8 +46,10 @@ import {
   readComposerDraft,
   readComposerDraftBindings,
   readComposerRetryNonce,
+  replaceComposerDraft,
   settleComposerDraftSubmission,
   subscribeComposerDraftAccepted,
+  subscribeComposerDraftReplaced,
   subscribeComposerOffer,
   writeComposerDraft,
   writeComposerRetryNonce,
@@ -220,6 +222,17 @@ const ComposerBody = memo(function Composer({
           commitComposition({ text: "", bindings: [] }, false);
         setMentionQuery(null);
         setSlashQuery(null);
+      }),
+    [draftKey],
+  );
+  // A draft rewritten from elsewhere (a left chat's recovered send) shows here, so the next edit
+  // keeps it.
+  useEffect(
+    () =>
+      subscribeComposerDraftReplaced(draftKey, (text) => {
+        // An edit like typing: a send still in flight must not restore its older text over it.
+        markEdited();
+        commitComposition({ text, bindings: readComposerDraftBindings(draftKey) }, false);
       }),
     [draftKey],
   );
@@ -579,15 +592,17 @@ const ComposerBody = memo(function Composer({
       setDictationSendDue(null);
       retryNonce.current = null;
       const words = compositionRef.current.text;
-      // Once the chat was left, a composer reopened for it owns the saved draft; only a draft
-      // still holding just these words is this send's to restore.
-      if (
-        (!mountedRef.current || draftKeyRef.current !== draftKey) &&
-        readComposerDraft(draftKey) !== words
-      )
+      const restored = { text: `${submitted.text} ${words}`, bindings: submitted.bindings };
+      if (mountedRef.current && draftKeyRef.current === draftKey) {
+        commitComposition(restored);
+        setSelectedSkill(selectedSkill);
         return;
-      commitComposition({ text: `${submitted.text} ${words}`, bindings: submitted.bindings });
-      setSelectedSkill(selectedSkill);
+      }
+      // Once the chat was left, a composer reopened for it owns the saved draft; only a draft
+      // still holding just these words is this send's to restore, and the reopened field
+      // follows it.
+      if (readComposerDraft(draftKey) === words)
+        replaceComposerDraft(draftKey, restored.text, restored.bindings);
       return;
     }
     // Restore only an untouched draft, retaining its nonce for an unchanged retry.
