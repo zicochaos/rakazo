@@ -1473,6 +1473,42 @@ it("sends a dictation that finishes while an earlier send is in flight", async (
   }
 });
 
+it("keeps a dictation queued behind a send that fails with that send's words", async () => {
+  let finish!: (accepted: boolean) => void;
+  const onSend = vi.fn(
+    (_text: string) =>
+      new Promise<boolean>((resolve) => {
+        finish = resolve;
+      }),
+  );
+  let onFinal!: (text: string) => void;
+  const listen = vi.spyOn(dictation, "listen").mockImplementation(async (options) => {
+    onFinal = options.onFinal;
+  });
+  try {
+    const textarea = renderComposer(onSend, { phoneCallsEnabled: true });
+    const mic = container?.querySelector<HTMLButtonElement>('button[aria-label="Hold to talk"]');
+    act(() => mic?.dispatchEvent(new MouseEvent("click", { bubbles: true, detail: 0 })));
+    act(() => onFinal("please book the flight"));
+    await act(async () => {});
+    rerenderComposer({ sending: true });
+    act(() => onFinal("and a hotel"));
+    await act(async () => {});
+    expect(onSend).toHaveBeenCalledTimes(1);
+    // The first send fails; the dictation queued behind it must not go out alone.
+    await act(async () => finish(false));
+    rerenderComposer({ sending: false });
+    await act(async () => {});
+    expect(onSend).toHaveBeenCalledTimes(1);
+    expect(textarea.value).toBe("please book the flight and a hotel");
+    expect(localStorage.getItem("rakazo.composerDraft.bot:bot-1")).toBe(
+      "please book the flight and a hotel",
+    );
+  } finally {
+    listen.mockRestore();
+  }
+});
+
 it("does not auto-send a draft typed over a dictation queued behind an earlier send", async () => {
   let finish!: (accepted: boolean) => void;
   const onSend = vi.fn(
