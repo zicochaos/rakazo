@@ -579,6 +579,13 @@ const ComposerBody = memo(function Composer({
       setDictationSendDue(null);
       retryNonce.current = null;
       const words = compositionRef.current.text;
+      // Once the chat was left, a composer reopened for it owns the saved draft; only a draft
+      // still holding just these words is this send's to restore.
+      if (
+        (!mountedRef.current || draftKeyRef.current !== draftKey) &&
+        readComposerDraft(draftKey) !== words
+      )
+        return;
       commitComposition({ text: `${submitted.text} ${words}`, bindings: submitted.bindings });
       setSelectedSkill(selectedSkill);
       return;
