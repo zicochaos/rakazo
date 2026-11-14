@@ -453,6 +453,7 @@ it("still reads the screen when the refresh after this tab's release fails", asy
     await controls.releaseComputer();
   });
   expect(release).toHaveBeenCalledWith({ botId: "bot-1", reason: undefined });
+  expect(state.isOwnControlEvent("bot-1", "computer.takeover.released")).toBe(false);
   expect(screenUrl).toHaveBeenCalledTimes(1);
 });
 
