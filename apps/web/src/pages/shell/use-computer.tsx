@@ -472,13 +472,9 @@ export function useComputerState({
     ownControlChange.current = { botId, type, leaseId, until: Date.now() + OWN_CONTROL_EVENT_MS };
   }
 
-  function clearOwnControlEvent(botId: string) {
-    if (ownControlChange.current?.botId === botId) ownControlChange.current = null;
-  }
-
   /** A take or release that failed changed nothing; an event it held back still gets its read. */
   function forgetOwnControlEvent(botId: string) {
-    clearOwnControlEvent(botId);
+    if (ownControlChange.current?.botId === botId) ownControlChange.current = null;
     // Only the bot on screen; another bot's read would discard the shown bot's own read.
     if (activeBotId.current === botId || computerBotIdRef.current === botId) {
       void refreshComputerScreen(botId).catch(() => undefined);
@@ -543,7 +539,6 @@ export function useComputerState({
     refreshComputerScreen,
     expectOwnControlEvent,
     forgetOwnControlEvent,
-    clearOwnControlEvent,
     isOwnControlEvent,
   };
 }
@@ -603,6 +598,7 @@ export function useComputerControls({
     setComputerBotId,
     computerOpenRef,
     computerBotIdRef,
+    computerRef,
     computerError,
     setComputerError,
     computerErrorFromScreen,
@@ -615,7 +611,6 @@ export function useComputerControls({
     refreshComputerScreen,
     expectOwnControlEvent,
     forgetOwnControlEvent,
-    clearOwnControlEvent,
   } = state;
   const [keepComputerRecovery, setKeepComputerRecovery] = useState(false);
   const recoveryHoldTimer = useRef<number | undefined>(undefined);
@@ -711,7 +706,7 @@ export function useComputerControls({
   async function refreshAfterControlChange(targetBotId: string) {
     const shown = activeBotId.current === targetBotId || computerBotIdRef.current === targetBotId;
     const screen = shown ? refreshComputerScreen(targetBotId).catch(() => null) : undefined;
-    await refreshComputerFor(targetBotId, false);
+    await refreshComputerFor(targetBotId, false).catch(() => undefined);
     await screen;
   }
 
@@ -907,13 +902,12 @@ export function useComputerControls({
     // Hand back and I'm done end whatever control this person holds on the bot's screen. Nothing
     // changes here until the server answers; the screen then follows its state.
     try {
-      expectOwnControlEvent(botId, "computer.takeover.released");
+      const leaseId = computerRef.current?.controlLeaseId;
+      if (leaseId) expectOwnControlEvent(botId, "computer.takeover.released", leaseId);
       await rpc.computer.release({ botId, reason }).catch((error) => {
         forgetOwnControlEvent(botId);
         throw error;
       });
-      // A no-op release emits no event. Never suppress a later person’s hand-back.
-      clearOwnControlEvent(botId);
       if (computerBotIdRef.current !== botId && activeBotId.current !== botId) return;
       await refreshAfterControlChange(botId).catch(() => undefined);
       const groupId = activeGroupId.current;

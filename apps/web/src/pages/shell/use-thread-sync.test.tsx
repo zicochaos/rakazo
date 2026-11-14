@@ -26,10 +26,12 @@ const ref = <T,>(current: T) => ({ current });
 const flush = () => act(async () => {});
 function deferred<T>() {
   let resolve!: (value: T) => void;
-  const promise = new Promise<T>((done) => {
+  let reject!: (error: Error) => void;
+  const promise = new Promise<T>((done, fail) => {
     resolve = done;
+    reject = fail;
   });
-  return { promise, resolve };
+  return { promise, resolve, reject };
 }
 
 function syncInput({
@@ -585,95 +587,99 @@ it.each([false, true])(
   },
 );
 
-it("keeps the screen this tab's takeover read when its own grant arrives before the thread", async () => {
-  vi.stubGlobal("IS_REACT_ACT_ENVIRONMENT", true);
-  const running = { botId: "bot-1", state: "running", controlHolder: "none", controlBotId: null };
-  const held = {
-    ...running,
-    controlHolder: "user",
-    controlBotId: "bot-1",
-    controlLeaseId: "lease-1",
-  };
-  const thread = (computer: object) =>
-    ({ threadId: "thread-1", cursor: 1, messages: [], run: null, computer }) as never;
-  const snapshot: ThreadSnapshot = thread(held);
-  const afterTake = deferred<ThreadSnapshot>();
-  const reads = [Promise.resolve(thread(running)), afterTake.promise];
-  const get = vi.fn(() => reads[get.mock.calls.length - 1] ?? Promise.resolve(snapshot));
-  const taken = deferred<{ url: string }>();
-  const screenUrl = vi.fn(async () => ({ url: "https://screen.test/before" }));
-  const rpc = {
-    threads: { get },
-    computer: {
-      screenUrl,
-      takeover: vi.fn(async () => ({ leaseId: "lease-1", expiresAt: "" })),
-      heartbeat: vi.fn(async () => ({ ok: true })),
-      release: vi.fn(async () => ({ ok: true })),
-    },
-  };
-  const bot = { id: "bot-1", name: "Bot", status: "idle", threadStatus: "idle" };
-  const input = syncInput({ inGroup: false, get, commitSnapshot: vi.fn() });
-  let state!: ReturnType<typeof useComputerState>;
-  let controls!: ReturnType<typeof useComputerControls>;
-  function Probe() {
-    state = useComputerState({
-      rpc: rpc as never,
-      panel: "computer",
-      activeId: "bot-1",
-      activeBotId: input.activeBotId,
-    });
-    const sync = useThreadSync({ ...input, rpc: rpc as never, computerState: state });
-    controls = useComputerControls({
-      rpc: rpc as never,
-      state,
-      panel: "computer",
-      active: bot as never,
-      bots: [bot as never],
-      botsRef: { current: [bot as never] },
-      activeBotId: input.activeBotId,
-      activeGroupId: input.activeGroupId,
-      runStatus: undefined,
-      sandboxProvider: undefined,
-      refreshThread: sync.refreshThread,
-      refreshGroupThread: vi.fn(),
-      onUpgrade: vi.fn(),
-    });
-    return null;
-  }
-  const root = createRoot(document.createElement("div"));
-  await act(async () => root.render(createElement(Probe)));
-  await flush();
-  expect(state.screenUrl).toBe("https://screen.test/before");
-  // After the takeover's own read, any further read fails.
-  screenUrl.mockClear();
-  screenUrl.mockReturnValueOnce(taken.promise).mockRejectedValue(new Error("offline"));
-  const subscription = vi.mocked(runThreadSubscription).mock.calls[0]![0];
+it.each([false, true])(
+  "keeps the takeover screen when the thread refresh fails: %s",
+  async (fails) => {
+    vi.stubGlobal("IS_REACT_ACT_ENVIRONMENT", true);
+    const running = { botId: "bot-1", state: "running", controlHolder: "none", controlBotId: null };
+    const held = {
+      ...running,
+      controlHolder: "user",
+      controlBotId: "bot-1",
+      controlLeaseId: "lease-1",
+    };
+    const thread = (computer: object) =>
+      ({ threadId: "thread-1", cursor: 1, messages: [], run: null, computer }) as never;
+    const snapshot: ThreadSnapshot = thread(held);
+    const afterTake = deferred<ThreadSnapshot>();
+    const reads = [Promise.resolve(thread(running)), afterTake.promise];
+    const get = vi.fn(() => reads[get.mock.calls.length - 1] ?? Promise.resolve(snapshot));
+    const taken = deferred<{ url: string }>();
+    const screenUrl = vi.fn(async () => ({ url: "https://screen.test/before" }));
+    const rpc = {
+      threads: { get },
+      computer: {
+        screenUrl,
+        takeover: vi.fn(async () => ({ leaseId: "lease-1", expiresAt: "" })),
+        heartbeat: vi.fn(async () => ({ ok: true })),
+        release: vi.fn(async () => ({ ok: true })),
+      },
+    };
+    const bot = { id: "bot-1", name: "Bot", status: "idle", threadStatus: "idle" };
+    const input = syncInput({ inGroup: false, get, commitSnapshot: vi.fn() });
+    let state!: ReturnType<typeof useComputerState>;
+    let controls!: ReturnType<typeof useComputerControls>;
+    function Probe() {
+      state = useComputerState({
+        rpc: rpc as never,
+        panel: "computer",
+        activeId: "bot-1",
+        activeBotId: input.activeBotId,
+      });
+      const sync = useThreadSync({ ...input, rpc: rpc as never, computerState: state });
+      controls = useComputerControls({
+        rpc: rpc as never,
+        state,
+        panel: "computer",
+        active: bot as never,
+        bots: [bot as never],
+        botsRef: { current: [bot as never] },
+        activeBotId: input.activeBotId,
+        activeGroupId: input.activeGroupId,
+        runStatus: undefined,
+        sandboxProvider: undefined,
+        refreshThread: sync.refreshThread,
+        refreshGroupThread: vi.fn(),
+        onUpgrade: vi.fn(),
+      });
+      return null;
+    }
+    const root = createRoot(document.createElement("div"));
+    await act(async () => root.render(createElement(Probe)));
+    await flush();
+    expect(state.screenUrl).toBe("https://screen.test/before");
+    // After the takeover's own read, any further read fails.
+    screenUrl.mockClear();
+    screenUrl.mockReturnValueOnce(taken.promise).mockRejectedValue(new Error("offline"));
+    const subscription = vi.mocked(runThreadSubscription).mock.calls[0]![0];
 
-  let took!: Promise<boolean>;
-  await act(async () => {
-    took = controls.openComputer("bot-1", true);
-  });
-  // The takeover's own screen read and thread refresh are out; the live grant arrives first.
-  expect(get).toHaveBeenCalledTimes(2);
-  expect(screenUrl).toHaveBeenCalledTimes(1);
-  const granted = {
-    type: "computer.takeover.granted",
-    botId: "bot-1",
-    payload: { leaseId: "lease-1" },
-  } as unknown as ProductEvent;
-  await act(async () => {
-    subscription.applyEvent(granted);
-    subscription.onEvent(granted, snapshot);
-  });
-  await act(async () => {
-    taken.resolve({ url: "https://screen.test/taken" });
-    afterTake.resolve(snapshot);
-    await took;
-  });
-  await flush();
-  expect(state.computer).toMatchObject({ controlHolder: "user", controlLeaseId: "lease-1" });
-  expect(state.screenUrl).toBe("https://screen.test/taken");
-  expect(state.computerError).toBeNull();
-  expect(screenUrl).toHaveBeenCalledTimes(1);
-  act(() => root.unmount());
-});
+    let took!: Promise<boolean>;
+    await act(async () => {
+      took = controls.openComputer("bot-1", true);
+    });
+    // The takeover's own screen read and thread refresh are out; the live grant arrives first.
+    expect(get).toHaveBeenCalledTimes(2);
+    expect(screenUrl).toHaveBeenCalledTimes(1);
+    const granted = {
+      type: "computer.takeover.granted",
+      botId: "bot-1",
+      payload: { leaseId: "lease-1" },
+    } as unknown as ProductEvent;
+    await act(async () => {
+      subscription.applyEvent(granted);
+      subscription.onEvent(granted, snapshot);
+    });
+    await act(async () => {
+      taken.resolve({ url: "https://screen.test/taken" });
+      if (fails) afterTake.reject(new Error("offline"));
+      else afterTake.resolve(snapshot);
+      await took;
+    });
+    await flush();
+    expect(state.computer).toMatchObject({ controlHolder: "user", controlLeaseId: "lease-1" });
+    expect(state.screenUrl).toBe("https://screen.test/taken");
+    expect(state.computerError).toBeNull();
+    expect(screenUrl).toHaveBeenCalledTimes(1);
+    act(() => root.unmount());
+  },
+);

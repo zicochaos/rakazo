@@ -620,6 +620,18 @@ async function renderTakingControl(
   };
 }
 
+it("matches a delayed release only to the lease handed back", async () => {
+  const { takeControl, handBack } = await renderTakingControl();
+  await act(async () => {
+    await takeControl();
+  });
+  await act(async () => {
+    await handBack();
+  });
+  expect(state.isOwnControlEvent("bot-1", "computer.takeover.released", "other-lease")).toBe(false);
+  expect(state.isOwnControlEvent("bot-1", "computer.takeover.released", "lease-1")).toBe(true);
+});
+
 it("hands its lease back when the computer closes, and keeps it while open", async () => {
   const { release, heartbeat, takeControl } = await renderTakingControl();
   await act(async () => {
