@@ -474,7 +474,8 @@ export function useThreadSync({
               );
             else void snapshotRefresh.invalidate().catch(() => undefined);
           }
-          if (!own) void refreshComputerScreen(active.id).catch(() => undefined);
+          if (!own && event.payload.answered !== true)
+            void refreshComputerScreen(active.id).catch(() => undefined);
         }
         if (isRunTerminalEvent(event)) refreshRoutineHistory(event.runId);
       },
@@ -562,10 +563,12 @@ export function useThreadSync({
           // waiting_input: reconcile ask cards if a stale post-send refresh raced SSE.
           void snapshotRefresh.invalidate().catch(() => undefined);
         }
-        // The event does not say which tab sent it, so every tab showing this computer refreshes.
+        // The initiating tab already reads the screen; request answers do not change it.
         const computerBotId = computerBotIdRef.current;
         if (isComputerStatusEvent(event) && computerBotId && event.botId === computerBotId) {
-          void refreshComputerScreen(computerBotId).catch(() => undefined);
+          const own = isOwnControlEvent(computerBotId, event.type, event.payload.leaseId);
+          if (!own && event.payload.answered !== true)
+            void refreshComputerScreen(computerBotId).catch(() => undefined);
         }
         if (isRunTerminalEvent(event)) refreshRoutineHistory(event.runId);
       },
