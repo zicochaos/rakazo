@@ -317,7 +317,7 @@ async function teamChatRun(input: {
       findFirst: vi.fn(async () => null),
       findUnique: vi.fn(async () => null),
     },
-    steeringMessage: { findFirst: vi.fn(async () => null) },
+    steeringMessage: { findFirst: vi.fn(async () => null), findMany: vi.fn(async () => []) },
     externalConversation: {
       findUnique: vi.fn(async () => ({
         provider: "slack",

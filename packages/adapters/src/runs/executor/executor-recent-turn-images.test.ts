@@ -230,6 +230,9 @@ async function runWithModel(
         nextMessageSeq: 3,
       })),
     },
+    steeringMessage: {
+      findMany: vi.fn(async () => []),
+    },
     message: {
       findMany: vi.fn(async (args: { where?: { threadId?: string } }) =>
         args.where?.threadId

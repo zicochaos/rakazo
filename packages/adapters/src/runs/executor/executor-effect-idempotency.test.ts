@@ -187,6 +187,7 @@ function fixture(runId = "run-1") {
     },
     steeringMessage: {
       findFirst: vi.fn(async () => null),
+      findMany: vi.fn(async () => []),
     },
     thread: {
       findUniqueOrThrow: vi.fn(async () => ({ id: run.threadId, groupId: null })),

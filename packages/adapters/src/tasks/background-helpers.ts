@@ -13,6 +13,7 @@ import {
   assertRunCanWriteHistory,
   changeMessageBlocks,
   createThreadMessageInTransaction,
+  loadRunSourceAttachmentMessages,
   storedMessageBlocks,
   THREAD_LOCK_TRANSACTION_OPTIONS,
 } from "@rakazo/db";
@@ -200,17 +201,10 @@ export async function startBackgroundHelper(
     });
     // The originating user's files remain available even when the parent never booted
     // its computer. Keep the input on the helper's own history for restart and approval resume.
-    const sources = await tx.message.findMany({
-      where: {
-        threadId: thread.id,
-        role: "user",
-        OR: [
-          { id: run.sourceMessageId ?? "" },
-          { steeringMessages: { some: { runId, claimedAt: { not: null } } } },
-        ],
-      },
-      select: { id: true, blocks: true },
-      orderBy: { seq: "asc" },
+    const sources = await loadRunSourceAttachmentMessages(tx, {
+      threadId: thread.id,
+      runId,
+      sourceMessageId: run.sourceMessageId,
     });
     const attachments = sources.flatMap((source) =>
       storedMessageBlocks(source).filter(

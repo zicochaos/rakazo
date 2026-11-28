@@ -574,6 +574,7 @@ function fixture({
     },
     steeringMessage: {
       findFirst: vi.fn(async (_query: unknown) => (outsideSteering ? { id: "steer-1" } : null)),
+      findMany: vi.fn(async () => []),
     },
     externalEffect,
   };

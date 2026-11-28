@@ -282,6 +282,9 @@ function fixture(runId = "run-1") {
       findUniqueOrThrow: vi.fn(async () => ({ id: run.threadId, groupId: null })),
       update: vi.fn(async () => ({ nextMessageSeq: 2, nextEventSeq: 2 })),
     },
+    steeringMessage: {
+      findMany: vi.fn(async () => []),
+    },
     message: {
       findMany: vi.fn(async () => []),
       findUnique: vi.fn(async () => null),

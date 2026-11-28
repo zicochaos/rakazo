@@ -231,6 +231,9 @@ async function runTurn(
         return { ...data, seq: savedEvents.length };
       }),
     },
+    steeringMessage: {
+      findMany: vi.fn(async () => []),
+    },
     message: {
       create: vi.fn(async ({ data }: { data: { blocks: MessageBlock[] } }) => {
         if (failMessage) {

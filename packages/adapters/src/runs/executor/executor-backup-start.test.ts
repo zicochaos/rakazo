@@ -214,6 +214,9 @@ async function runTurn({
           nextMessageSeq: 2,
         })),
       },
+      steeringMessage: {
+        findMany: vi.fn(async () => []),
+      },
       message: {
         findMany: vi.fn(async () => []),
         findUnique: vi.fn(async () => null),

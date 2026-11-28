@@ -1,5 +1,9 @@
 import { botMessageAllowsSilence, userTurnMessageForRun } from "@rakazo/core";
-import { isPartialReplyClientNonce, storedMessageBlocks } from "@rakazo/db";
+import {
+  isPartialReplyClientNonce,
+  loadCurrentRunImageMessages,
+  storedMessageBlocks,
+} from "@rakazo/db";
 import { getLogger } from "@rakazo/logging";
 import { loadAgentMemoryContext } from "../../memory/memory-context.js";
 import { latestEndedDate } from "../../memory/memory-expiry.js";
@@ -179,19 +183,12 @@ export async function loadTurnContext(
   // A run owns its source message and steering bound to it, including waiting-input
   // replies. message.runId alone is display linkage: a send during background work
   // points at that run but waits for its continuation. Read independently of history.
-  const currentRunImageMessages = await deps.prisma.message.findMany({
-    where: {
-      threadId: thread.id,
-      OR: [
-        ...(run.sourceMessageId ? [{ id: run.sourceMessageId }] : []),
-        ...(run.trigger === "helper" ? [{ runId }] : []),
-        { steeringMessages: { some: { runId, botId: run.botId } } },
-      ],
-      role: "user",
-      blocks: { array_contains: [{ kind: "image" }] },
-    },
-    select: { id: true, blocks: true },
-    orderBy: { seq: "asc" },
+  const currentRunImageMessages = await loadCurrentRunImageMessages(deps.prisma, {
+    id: runId,
+    threadId: thread.id,
+    botId: run.botId,
+    trigger: run.trigger,
+    sourceMessageId: run.sourceMessageId,
   });
   // The content extension decrypts imageHandling after filtering on plain kind.
   const confirmedRunImages = currentRunImageMessages.flatMap((message) =>

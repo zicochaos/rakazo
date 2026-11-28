@@ -176,6 +176,91 @@ async function withOwnToolHistory<
   );
 }
 
+/**
+ * User image messages belonging to the current run: its source message, steering bound to it
+ * (including waiting-input replies), and for helper runs any user messages created under it.
+ * Resolves candidate ids through indexed lookups first so Postgres never scans the whole thread.
+ */
+export async function loadCurrentRunImageMessages(
+  prisma: PrismaClient,
+  run: {
+    id: string;
+    threadId: string;
+    botId: string;
+    trigger: string;
+    sourceMessageId: string | null;
+  },
+) {
+  const steering = await prisma.steeringMessage.findMany({
+    where: { runId: run.id, botId: run.botId },
+    select: { messageId: true },
+  });
+  const candidateIds = [
+    ...new Set([
+      ...(run.sourceMessageId ? [run.sourceMessageId] : []),
+      ...steering.map((row) => row.messageId),
+    ]),
+  ];
+  const imageFilter = {
+    threadId: run.threadId,
+    role: "user",
+    blocks: { array_contains: [{ kind: "image" }] },
+  } as const;
+  if (run.trigger !== "helper") {
+    if (!candidateIds.length) return [];
+    return prisma.message.findMany({
+      where: { ...imageFilter, id: { in: candidateIds } },
+      select: { id: true, blocks: true },
+      orderBy: { seq: "asc" },
+    });
+  }
+  const [byId, byRun] = await Promise.all([
+    candidateIds.length
+      ? prisma.message.findMany({
+          where: { ...imageFilter, id: { in: candidateIds } },
+          select: { id: true, seq: true, blocks: true },
+          orderBy: { seq: "asc" },
+        })
+      : [],
+    prisma.message.findMany({
+      where: { ...imageFilter, runId: run.id },
+      select: { id: true, seq: true, blocks: true },
+      orderBy: { seq: "asc" },
+    }),
+  ]);
+  const merged = new Map<string, { id: string; seq: number; blocks: Prisma.JsonValue }>();
+  for (const row of [...byId, ...byRun]) merged.set(row.id, row);
+  return [...merged.values()]
+    .sort((left, right) => left.seq - right.seq)
+    .map(({ id, blocks }) => ({ id, blocks }));
+}
+
+/**
+ * User messages whose attachments belong to a run (its source message and claimed steering rows),
+ * resolved through indexed lookups so Postgres never scans the whole thread.
+ */
+export async function loadRunSourceAttachmentMessages(
+  client: PrismaClient | Prisma.TransactionClient,
+  run: { threadId: string; runId: string; sourceMessageId: string | null },
+) {
+  const steering = await client.steeringMessage.findMany({
+    where: { runId: run.runId, claimedAt: { not: null } },
+    select: { messageId: true },
+  });
+  const candidateIds = [
+    ...new Set([
+      ...(run.sourceMessageId ? [run.sourceMessageId] : []),
+      ...steering.map((row) => row.messageId),
+    ]),
+  ];
+  if (!candidateIds.length) return [];
+  return client.message.findMany({
+    where: { threadId: run.threadId, role: "user", id: { in: candidateIds } },
+    select: { id: true, blocks: true },
+    orderBy: { seq: "asc" },
+  });
+}
+
 /** Marks the bot message that keeps the reply text of a run that failed partway through it. */
 export function partialReplyClientNonce(runId: string): string {
   return `partial-reply:${runId}`;

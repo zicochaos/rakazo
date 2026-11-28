@@ -58,6 +58,9 @@ function harness(
   }));
   const tx = {
     $queryRaw: vi.fn(async () => []),
+    steeringMessage: {
+      findMany: vi.fn(async (_args: unknown): Promise<{ messageId: string }[]> => []),
+    },
     message: {
       findMany: vi.fn(async (_args: unknown): Promise<{ id: string; blocks: unknown[] }[]> => []),
     },
@@ -146,19 +149,23 @@ describe("starting a background helper", () => {
       mimeType: "text/plain",
       size: 12,
     };
+    h.tx.steeringMessage.findMany.mockResolvedValue([{ messageId: "steering-message" }]);
     h.tx.message.findMany.mockResolvedValue([
       { id: "user-message", blocks: [{ kind: "text", text: "Summarize this" }, file] },
     ]);
     await startBackgroundHelper(h.ctx, START);
+    expect(h.tx.steeringMessage.findMany).toHaveBeenCalledWith(
+      expect.objectContaining({
+        where: { runId: "run-1", claimedAt: { not: null } },
+        select: { messageId: true },
+      }),
+    );
     expect(h.tx.message.findMany).toHaveBeenCalledWith(
       expect.objectContaining({
         where: expect.objectContaining({
           threadId: "chat",
           role: "user",
-          OR: [
-            { id: "user-message" },
-            { steeringMessages: { some: { runId: "run-1", claimedAt: { not: null } } } },
-          ],
+          id: { in: ["user-message", "steering-message"] },
         }),
       }),
     );

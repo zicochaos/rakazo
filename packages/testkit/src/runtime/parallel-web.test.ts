@@ -72,6 +72,7 @@ function executorFixture(
       updateMany: async () => ({ count: 1 }),
     },
     thread: { findUniqueOrThrow: async () => ({ id: "thread", groupId: null }) },
+    steeringMessage: { findMany: async () => [] },
     message: { findMany: async () => [] },
     task: {
       findUniqueOrThrow: async () => ({

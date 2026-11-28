@@ -149,6 +149,9 @@ async function runInSpace(space: Space, options: RunOptions = {}) {
         ...(space === "legacy" ? {} : { space: { _count: { memberships: space.members } } }),
       })),
     },
+    steeringMessage: {
+      findMany: vi.fn(async () => []),
+    },
     message: {
       findMany: vi.fn(async (args: { where?: { threadId?: string } }) =>
         args.where?.threadId ? historyMessages(space !== "legacy" && space.authors) : [],

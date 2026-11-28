@@ -107,11 +107,22 @@ function fixture(
         ...empty,
         findMany: async () => [{ id: "fixture-image", storageKey: "fixture-image-key" }],
       },
+      steeringMessage: {
+        ...empty,
+        findMany: async ({ where }: { where?: { runId?: string } } = {}) =>
+          steering.filter((row) => !where?.runId || row.runId === where.runId),
+      },
       message: {
         ...empty,
-        findMany: async ({ where }: { where?: { OR?: Record<string, unknown>[] } } = {}) =>
-          (reply ? [replyMessage] : []).filter(
-            (message) =>
+        findMany: async ({
+          where,
+        }: {
+          where?: { id?: { in?: string[] }; runId?: string; OR?: Record<string, unknown>[] };
+        } = {}) =>
+          (reply ? [replyMessage] : []).filter((message) => {
+            if (where?.id?.in) return where.id.in.includes(message.id);
+            if (where?.runId) return message.runId === where.runId;
+            return (
               !where?.OR ||
               where.OR.some((match) =>
                 "id" in match
@@ -125,8 +136,9 @@ function fixture(
                             (match as { steeringMessages: { some: { runId: string } } })
                               .steeringMessages.some.runId,
                       ),
-              ),
-          ),
+              )
+            );
+          }),
         create: async ({ data }: { data: object }) => ({ id: "fixture-message", ...data }),
       },
       event: { ...empty, create: async ({ data }: { data: object }) => ({ seq: 1, ...data }) },
