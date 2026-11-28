@@ -185,6 +185,11 @@ export async function loadRunRecords(
   // A routine the owner let use their computer reads only its own prompt.
   const ownerComputerRoutine = await routineRunUsesOwnerComputer(deps.prisma, run);
   const historyReach = ownerComputerRoutine ? "none" : runHistoryReach(run);
+  // Skip fetching and decrypting toolHistory whenever the trigger or channel already rules out replay.
+  const mayReplayToolHistory = runReplaysToolHistory(run.trigger, {
+    fromUser: true,
+    nonOwnerChat: (isDelegatedRun(run.trigger) && !origin) || messagingChannelRun,
+  });
   const [
     { bot, ownerLabs },
     thread,
@@ -244,6 +249,7 @@ export async function loadRunRecords(
             earlierResults: historyReach === "recent" ? ROUTINE_EARLIER_RESULTS : 0,
           }
         : undefined,
+      { includeToolHistory: mayReplayToolHistory },
     ),
     run.trigger === "bot_message"
       ? loadBotMessageContext(deps.prisma, run.sourceMessageId)

@@ -151,10 +151,11 @@ async function teamChatRun(input: {
       update: vi.fn(async () => ({ nextMessageSeq: 2, nextEventSeq: 2 })),
     },
     message: {
-      // The history loader asks for tool history; an earlier reply read the owner's inbox.
+      // The history loader selects steeringMessages (and toolHistory when replay is allowed);
+      // an earlier reply read the owner's inbox.
       findMany: vi.fn(
         async (args: {
-          select?: { toolHistory?: boolean };
+          select?: { steeringMessages?: unknown; toolHistory?: boolean };
           where: { threadId?: string; OR?: HistoryClause[] };
         }) => {
           if (input.attachment && args.where?.threadId === "hidden-thread" && !args.where.OR)
@@ -180,7 +181,7 @@ async function teamChatRun(input: {
                 ],
               },
             ];
-          if (!args.select?.toolHistory) return [];
+          if (!args.select?.steeringMessages) return [];
           const row = {
             threadId: "thread-1",
             botId: null as string | null,
@@ -231,7 +232,11 @@ async function teamChatRun(input: {
                 },
               ],
             },
-          ].filter((message) => inHistory(message, args.where));
+          ]
+            .filter((message) => inHistory(message, args.where))
+            .map(({ toolHistory, ...rest }) =>
+              args.select?.toolHistory ? { ...rest, toolHistory } : rest,
+            );
         },
       ),
       findFirst: vi.fn(async () => null),

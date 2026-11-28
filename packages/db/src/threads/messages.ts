@@ -14,7 +14,7 @@ import { markThreadUnreadForMembers } from "./thread-reads.js";
  */
 export type GroupTurnHistory = { channelId: string } | { sourceMessageId: string };
 
-const HISTORY_MESSAGE_SELECT = (botId: string) =>
+const HISTORY_MESSAGE_SELECT_BASE = (botId: string) =>
   ({
     id: true,
     threadId: true,
@@ -23,8 +23,6 @@ const HISTORY_MESSAGE_SELECT = (botId: string) =>
     botId: true,
     runId: true,
     blocks: true,
-    // Only the bot's own runs read this: it is what its earlier tool calls were sent and returned.
-    toolHistory: true,
     authorUserId: true,
     createdAt: true,
     replyToMessageId: true,
@@ -32,6 +30,13 @@ const HISTORY_MESSAGE_SELECT = (botId: string) =>
     replyTo: { select: { id: true, threadId: true, role: true, botId: true, blocks: true } },
     clientNonce: true,
     steeringMessages: { where: { botId, runId: null }, select: { id: true } },
+  }) satisfies Prisma.MessageSelect;
+
+const HISTORY_MESSAGE_SELECT = (botId: string) =>
+  ({
+    ...HISTORY_MESSAGE_SELECT_BASE(botId),
+    // Only the bot's own runs read this: it is what its earlier tool calls were sent and returned.
+    toolHistory: true,
   }) satisfies Prisma.MessageSelect;
 
 /**
@@ -72,7 +77,15 @@ export async function loadRunHistoryMessages(
    * the latest replies of the routine's earlier runs, however far back they are.
    */
   routine?: { routineId: string; earlierResults: number },
+  options?: {
+    /**
+     * Skip selecting and decrypting `toolHistory` (and its run-owner lookup) when the caller
+     * already knows this run will not replay earlier tool calls. Defaults to `true`.
+     */
+    includeToolHistory?: boolean;
+  },
 ) {
+  const includeToolHistory = options?.includeToolHistory ?? true;
   const readableIds = routine
     ? (
         await prisma.$queryRaw<Array<{ id: string }>>`
@@ -82,34 +95,45 @@ export async function loadRunHistoryMessages(
           LIMIT ${limit}`
       ).map(({ id }) => id)
     : undefined;
-  const recent = await prisma.message.findMany({
-    where: {
-      threadId: run.threadId,
-      ...(readableIds ? { id: { in: readableIds } } : {}),
-      ...(groupTurn
-        ? {
-            OR: [
-              "channelId" in groupTurn
-                ? {
-                    role: "user",
-                    blocks: {
-                      array_contains: [{ kind: "channel_message", channelId: groupTurn.channelId }],
-                    },
-                  }
-                : { id: groupTurn.sourceMessageId },
-              { role: "bot", runId: run.id },
-            ],
-          }
-        : {}),
-    },
-    orderBy: { seq: "desc" },
-    take: limit,
-    select: HISTORY_MESSAGE_SELECT(run.botId),
-  });
+  const recentWhere = {
+    threadId: run.threadId,
+    ...(readableIds ? { id: { in: readableIds } } : {}),
+    ...(groupTurn
+      ? {
+          OR: [
+            "channelId" in groupTurn
+              ? {
+                  role: "user",
+                  blocks: {
+                    array_contains: [{ kind: "channel_message", channelId: groupTurn.channelId }],
+                  },
+                }
+              : { id: groupTurn.sourceMessageId },
+            { role: "bot", runId: run.id },
+          ],
+        }
+      : {}),
+  };
+  const recent = includeToolHistory
+    ? await prisma.message.findMany({
+        where: recentWhere,
+        orderBy: { seq: "desc" },
+        take: limit,
+        select: HISTORY_MESSAGE_SELECT(run.botId),
+      })
+    : (
+        await prisma.message.findMany({
+          where: recentWhere,
+          orderBy: { seq: "desc" },
+          take: limit,
+          select: HISTORY_MESSAGE_SELECT_BASE(run.botId),
+        })
+      ).map((message) => ({ ...message, toolHistory: null as string | null }));
   const earlier = routine?.earlierResults
     ? await earlierRoutineResults(prisma, run, {
         routineId: routine.routineId,
         limit: routine.earlierResults,
+        includeToolHistory,
       })
     : [];
   const recentIds = new Set(recent.map((message) => message.id));
@@ -119,7 +143,7 @@ export async function loadRunHistoryMessages(
     .map((message) =>
       routine ? { ...message, replyToMessageId: null, replyQuote: null, replyTo: null } : message,
     );
-  return withOwnToolHistory(prisma, run, messages);
+  return includeToolHistory ? withOwnToolHistory(prisma, run, messages) : messages;
 }
 
 /**
@@ -129,7 +153,7 @@ export async function loadRunHistoryMessages(
 async function earlierRoutineResults(
   prisma: PrismaClient,
   run: { id: string; threadId: string; botId: string; userId: string },
-  earlier: { routineId: string; limit: number },
+  earlier: { routineId: string; limit: number; includeToolHistory: boolean },
 ) {
   const latest = await prisma.$queryRaw<Array<{ id: string }>>`
     SELECT last_reply.id FROM runs r
@@ -144,11 +168,21 @@ async function earlierRoutineResults(
     ORDER BY r."createdAt" DESC
     LIMIT ${earlier.limit}`;
   if (!latest.length) return [];
-  return prisma.message.findMany({
-    where: { id: { in: latest.map(({ id }) => id) } },
-    orderBy: { seq: "desc" },
-    select: HISTORY_MESSAGE_SELECT(run.botId),
-  });
+  const ids = latest.map(({ id }) => id);
+  if (earlier.includeToolHistory) {
+    return prisma.message.findMany({
+      where: { id: { in: ids } },
+      orderBy: { seq: "desc" },
+      select: HISTORY_MESSAGE_SELECT(run.botId),
+    });
+  }
+  return (
+    await prisma.message.findMany({
+      where: { id: { in: ids } },
+      orderBy: { seq: "desc" },
+      select: HISTORY_MESSAGE_SELECT_BASE(run.botId),
+    })
+  ).map((message) => ({ ...message, toolHistory: null as string | null }));
 }
 
 /**
