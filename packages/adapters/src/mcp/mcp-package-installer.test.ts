@@ -154,9 +154,6 @@ describe("ensureMcpPackage", () => {
     await rm(work, { recursive: true, force: true });
   });
 
-  // Generous waits: under a loaded parallel run the stub npm install can take seconds.
-  const WAIT = { timeout: 15_000, interval: 50 };
-
   it("preserves a fresh owner replacing the inspected expired lock", async () => {
     const lock = `${mcpPackageDir("race-pkg", root, options().env)}.lock`;
     await mkdir(lock, { recursive: true });
@@ -164,29 +161,37 @@ describe("ensureMcpPackage", () => {
     const fresh = { ...expired, token: "fresh", expiresAt: Date.now() + 60_000 };
     await writeFile(join(lock, "owner"), JSON.stringify(expired));
     const original = (await vi.importActual<typeof fs>("node:fs/promises")).rename;
+    const lockRestored = deferred();
+    const settled = deferred();
     const spy = vi.spyOn(fs, "rename").mockImplementation(async (from, to) => {
       if (from === lock) {
         await writeFile(join(lock, "owner"), JSON.stringify(fresh));
       }
-      return original(from, to);
+      const result = await original(from, to);
+      if (to === lock) lockRestored.resolve();
+      return result;
     });
     const controller = new AbortController();
-    const pending = ensureMcpPackage("race-pkg", { ...options(), signal: controller.signal });
+    const pending = ensureMcpPackage("race-pkg", {
+      ...options(),
+      signal: controller.signal,
+      onSettled: async () => {
+        settled.resolve();
+      },
+    });
     try {
-      await vi.waitFor(() => expect(spy).toHaveBeenCalled(), WAIT);
-      await vi.waitFor(
-        async () => expect(JSON.parse(await readFile(join(lock, "owner"), "utf8"))).toEqual(fresh),
-        WAIT,
-      );
+      await lockRestored.promise;
+      expect(JSON.parse(await readFile(join(lock, "owner"), "utf8"))).toEqual(fresh);
       controller.abort();
       await expect(pending).rejects.toThrow();
       expect(await runs()).toEqual([]);
     } finally {
-      spy.mockImplementation(original);
+      spy.mockRestore();
       await rm(lock, { recursive: true, force: true });
-      // Let the shared install finish before deleting its fixture.
-      await vi.waitFor(async () => expect(await runs()).toHaveLength(1), WAIT);
-      await vi.waitFor(async () => expect(await leftovers()).toEqual([]), WAIT);
+      // Wait for the shared install to finish before afterEach removes its temp dir.
+      await settled.promise;
+      expect(await runs()).toHaveLength(1);
+      expect(await leftovers()).toEqual([]);
     }
   }, 30_000);
 
@@ -311,14 +316,43 @@ describe("ensureMcpPackage", () => {
       }),
     );
 
+    const originalReadFile = (await vi.importActual<typeof fs>("node:fs/promises")).readFile;
+    const originalSetTimeout = globalThis.setTimeout;
+    const waiterPolling = deferred();
+    let ownerInspected = false;
+    const readFileSpy = vi.spyOn(fs, "readFile").mockImplementation(async (...args) => {
+      const result = await originalReadFile(...args);
+      if (args[0] === join(lock, "owner")) ownerInspected = true;
+      return result;
+    });
+    const setTimeoutSpy = vi.spyOn(globalThis, "setTimeout").mockImplementation(((
+      callback: (...args: unknown[]) => void,
+      ms?: number,
+      ...args: unknown[]
+    ) => {
+      if (ownerInspected && typeof ms === "number" && ms >= 100) {
+        waiterPolling.resolve();
+      }
+      return originalSetTimeout(callback, ms, ...args);
+    }) as typeof setTimeout);
     const waiting = ensureMcpPackage("server@4.0.0", options());
-    await new Promise((done) => setTimeout(done, 400));
-    // It publishes and releases the lock; the waiter picks the result up.
-    await rename(join(aside, key), ready);
-    await rm(lock, { recursive: true, force: true });
+    try {
+      const outcome = await Promise.race([
+        waiterPolling.promise.then(() => "polled" as const),
+        waiting.then(() => "finished" as const),
+      ]);
+      expect(outcome).toBe("polled");
+      expect(existsSync(lock)).toBe(true);
+      // It publishes and releases the lock; the waiter picks the result up.
+      await rename(join(aside, key), ready);
+      await rm(lock, { recursive: true, force: true });
 
-    expect((await waiting).binPath).toBe(probe.binPath);
-    expect(await runs()).toHaveLength(1);
+      expect((await waiting).binPath).toBe(probe.binPath);
+      expect(await runs()).toHaveLength(1);
+    } finally {
+      readFileSpy.mockRestore();
+      setTimeoutSpy.mockRestore();
+    }
   });
 
   it("stops waiting on abort while the install finishes for the next caller", async () => {
