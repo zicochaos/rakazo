@@ -756,4 +756,36 @@ describe("a shell command's use of its variables", () => {
     fakeAuditLog("member", true);
     expect(await shell(db).run()).toMatchObject({ stdout: "ok\n", code: 0 });
   });
+
+  it("filters vault queries to command credentials when loading variables and checking conflicts", async () => {
+    const db = fakeDatabase();
+    await save(db, "deploy-token", value);
+    await save(db, "revoked-token", "fake-revoked-secret-1");
+    await relabelVaultItem(db.prisma, scope, "revoked-token", { policy: "off" });
+    await save(db, "api-key", "fake-bearer-secret-1", {
+      origin: "https://api.example.test",
+      auth: { type: "bearer" },
+    });
+    const findMany = vi.spyOn(db.prisma.vaultCredential, "findMany");
+    findMany.mockClear();
+
+    const loaded = await loadCommandVariables(db.prisma, secretStore, { ...scope, botId: "bot-1" });
+    expect(loaded.env).toEqual({ DEPLOY_TOKEN: value });
+    expect(loaded.redactions).toContain("fake-revoked-secret-1");
+    expect(loaded.redactions).not.toContain("fake-bearer-secret-1");
+    expect(findMany).toHaveBeenCalledTimes(2);
+    for (const [args] of findMany.mock.calls) {
+      expect(args?.where).toMatchObject({ auth: { path: ["type"], equals: "command" } });
+    }
+
+    findMany.mockClear();
+    await expect(save(db, "deploy_token", "fake-other-value")).rejects.toThrow(
+      /deploy-token is already exported as \$DEPLOY_TOKEN/,
+    );
+    expect(findMany).toHaveBeenCalledWith(
+      expect.objectContaining({
+        where: expect.objectContaining({ auth: { path: ["type"], equals: "command" } }),
+      }),
+    );
+  });
 });

@@ -27,6 +27,8 @@ const commandRowFields = {
   ciphertext: true,
 } as const;
 
+const commandAuthFilter = { auth: { path: ["type"], equals: "command" } } as const;
+
 /** Each command variable of these rows, decrypted once; one that can't be read has no value. */
 async function readCommandVariables(
   prisma: PrismaClient,
@@ -95,12 +97,12 @@ export async function loadCommandVariables(
   const { botId: _, ...owner } = scope;
   const [usable, rows] = await Promise.all([
     prisma.vaultCredential.findMany({
-      where: await usableVaultFields(prisma, scope),
+      where: { ...(await usableVaultFields(prisma, scope)), ...commandAuthFilter },
       select: commandRowFields,
       orderBy: { name: "asc" },
     }),
     prisma.vaultCredential.findMany({
-      where: await vaultFields(prisma, owner),
+      where: { ...(await vaultFields(prisma, owner)), ...commandAuthFilter },
       select: commandRowFields,
       orderBy: { name: "asc" },
     }),
@@ -161,7 +163,11 @@ export async function findCommandVariableConflict(
   if (destination.auth.type !== "command") return undefined;
   const variable = commandVariableName(destination.name);
   const rows = await client.vaultCredential.findMany({
-    where: { ...(await vaultFields(client, scope)), name: { not: destination.name } },
+    where: {
+      ...(await vaultFields(client, scope)),
+      ...commandAuthFilter,
+      name: { not: destination.name },
+    },
     select: { name: true, auth: true },
   });
   const name = rows.find(
