@@ -3,6 +3,7 @@ import type { Prisma, PrismaClient } from "../database/client.js";
 import {
   createThreadMessage,
   createThreadMessageInTransaction,
+  loadRunHistoryMessages,
   RunHistoryWriteError,
 } from "./messages.js";
 
@@ -114,5 +115,114 @@ describe("createThreadMessage", () => {
       }),
     ).rejects.toThrow("unique constraint");
     expect(run).toHaveBeenCalledTimes(1);
+  });
+});
+
+describe("loadRunHistoryMessages", () => {
+  it("omits toolHistory selection and skips run-owner lookup when includeToolHistory is false", async () => {
+    const findMany = vi
+      .fn()
+      .mockResolvedValueOnce([
+        {
+          id: "m-2",
+          threadId: "t-1",
+          seq: 2,
+          role: "bot",
+          botId: "bot-1",
+          runId: "run-prev",
+          blocks: [],
+          authorUserId: null,
+          createdAt: new Date(0),
+          replyToMessageId: null,
+          replyQuote: null,
+          replyTo: null,
+          clientNonce: null,
+          steeringMessages: [],
+        },
+      ])
+      .mockResolvedValueOnce([
+        {
+          id: "m-1",
+          threadId: "t-1",
+          seq: 1,
+          role: "bot",
+          botId: "bot-1",
+          runId: "run-old",
+          blocks: [],
+          authorUserId: null,
+          createdAt: new Date(0),
+          replyToMessageId: null,
+          replyQuote: null,
+          replyTo: null,
+          clientNonce: null,
+          steeringMessages: [],
+        },
+      ]);
+    const runFindMany = vi.fn();
+    const queryRaw = vi
+      .fn()
+      .mockResolvedValueOnce([{ id: "m-2" }])
+      .mockResolvedValueOnce([{ id: "m-1" }]);
+    const prisma = {
+      $queryRaw: queryRaw,
+      message: { findMany },
+      run: { findMany: runFindMany },
+    } as unknown as PrismaClient;
+
+    const loaded = await loadRunHistoryMessages(
+      prisma,
+      { id: "run-2", threadId: "t-1", botId: "bot-1", userId: "user-1" },
+      10,
+      undefined,
+      { routineId: "routine-1", earlierResults: 1 },
+      { includeToolHistory: false },
+    );
+
+    expect(findMany).toHaveBeenCalledTimes(2);
+    for (const [args] of findMany.mock.calls) {
+      expect(args.select).not.toHaveProperty("toolHistory");
+    }
+    expect(runFindMany).not.toHaveBeenCalled();
+    expect(loaded.map((message) => [message.id, message.toolHistory])).toEqual([
+      ["m-2", null],
+      ["m-1", null],
+    ]);
+  });
+
+  it("selects toolHistory and filters owners by default", async () => {
+    const findMany = vi.fn().mockResolvedValue([
+      {
+        id: "m-1",
+        threadId: "t-1",
+        seq: 1,
+        role: "bot",
+        botId: "bot-1",
+        runId: "run-other",
+        blocks: [],
+        toolHistory: '{"calls":[]}',
+        authorUserId: null,
+        createdAt: new Date(0),
+        replyToMessageId: null,
+        replyQuote: null,
+        replyTo: null,
+        clientNonce: null,
+        steeringMessages: [],
+      },
+    ]);
+    const runFindMany = vi.fn().mockResolvedValue([{ id: "run-other", userId: "user-2" }]);
+    const prisma = {
+      message: { findMany },
+      run: { findMany: runFindMany },
+    } as unknown as PrismaClient;
+
+    const loaded = await loadRunHistoryMessages(
+      prisma,
+      { id: "run-2", threadId: "t-1", botId: "bot-1", userId: "user-1" },
+      10,
+    );
+
+    expect(findMany.mock.calls[0]?.[0]?.select).toHaveProperty("toolHistory", true);
+    expect(runFindMany).toHaveBeenCalledOnce();
+    expect(loaded[0]?.toolHistory).toBeNull();
   });
 });
